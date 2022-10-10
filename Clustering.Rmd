@@ -1,0 +1,678 @@
+---
+title: "Clustering"
+author: "Buse Demir "
+date: "05 04 2022"
+output: html_document
+---
+
+
+# 1) VERİ SETİNİN TANITILMASI
+#### Veri Seti Linki: (http://kaggle.com/code/dikshabhati2002/k-means-and-hierarchical-clustering/data)
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(readr)
+kmeans_result <- read_csv("kmeans_result.csv")
+mydata <- read_csv("kmeans_result.csv")
+mydata<-mydata[,-11]
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+#Gerekli Paketler
+library(cluster)
+library(devtools)
+library(graphics)
+library(corrplot)
+library(pastecs)
+library(factoextra)
+library(ggplot2)
+library(ggbiplot)
+library(fpc)
+library(fossil)#rand.indeks icin 
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+rownames(mydata)<-mydata$country
+data<-subset(mydata,select=-c(country))
+rownames(data)<-mydata$country
+mydata=data
+head(data)
+```
+
+### --> Yukarıda ilk 6 gözlem değeri verilen veri seti 167 satır 10 sütundan oluşmaktadır ve bazı ülkelere ait sosyo-ekonomik verileri ve sağlık verilerini içermektedir.Bu özelliklere bakılarak bir yardım kuruluşu (Help International) tarafından toplanan 10 milyon doların ihtiyacı olan ülkelere dağıtılması için bir strateji belirlenmek istenmektedir. 
+
+#### *country* : İstatistiklerin ait olduğu ülkeler
+#### *child_mort* : 1000 doğumda 5 yaş altı çocukların ölümü
+#### *exports*: Kişi başına mal ve hizmet ihracatı. Kişi başına düşen GSYİH'ı yüzde  olarak verilir
+#### *health*: Kişi başına toplam sağlık harcaması. Kişi başına düşen GSYİH'ı yüzde olarak verilir
+#### *export*: Kişi başına mal ve hizmet ithalatı. Kişi başına düşen GSYİH'ı yüzde olarak verilir
+#### *income*: Kişi başına net gelir
+#### *inflation*: Toplam GSYİH'nın yıllık büyüme oranının ölçümü
+#### *life_expec*: Mevcut ölüm oranları aynı kalacaksa, yeni doğan bir çocuğun yaşayacağı ortalama yıl sayısı
+#### *total_fer*: Mevcut yaş-doğurganlık oranları aynı kalırsa her kadının doğacak çocuk sayısı.
+#### *gdpp*: Kişi başına düşen GSYİH. Toplam GSYİH'nin toplam nüfusa bölünmesiyle hesaplanır.
+
+
+# 2) TANIMLAYICI İSTATİSTİKLER
+#### Tanımlayıcı istastik değerlerine bakabilmek için *country* değişkeni veriden çıkarılmıştır.
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+summary(data)
+boxplot(data)
+```
+
+#### Değiskenlerin kutu grafiklerine ve *summary* değerlerine bakıldığında sapan değerler ve çarpık dağılımlar gözlemlenmiştir.
+
+```{r eval=FALSE, include=FALSE}
+#Tum değiskenlerin ayri ayri grafikleri
+boxplot(data$child_mort,horizontal = TRUE,)
+boxplot(data$exports,horizontal = TRUE)
+boxplot(data$health,horizontal = TRUE)
+boxplot(data$imports,horizontal = TRUE)
+boxplot(data$ income,horizontal = TRUE)
+boxplot(data$inflation,horizontal = TRUE)
+boxplot(data$life_expec,horizontal = TRUE)
+boxplot(data$total_fer,horizontal = TRUE)
+boxplot(data$gdpp,horizontal = TRUE)
+```
+
+### Histogram Grafikleri
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(3,3))
+hist(data$child_mort,xlab  = "child_mort",main="Histogram")
+hist(data$exports,xlab="exports",main="Histogram")
+hist(data$health,xlab="health",main="Histogram")
+hist(data$imports,xlab="imports",main="Histogram")
+hist(data$income,xlab="income",main="Histogram")
+hist(data$inflation,xlab="inflation",main="Histogram")
+hist(data$life_expec,xlab="life_expection",main="Histogram")
+hist(data$total_fer,xlab="total_fer",main="Histogram")
+hist(data$gdpp,xlab="gdpp",main="Histogram")
+apply(data,2,sd)
+apply(data,2,mean)
+```
+
+#### Histogram grafiklerine bakıldığında ise *child_mort*, *exports*,*imports*,*income*,*inflation*,*total_fer* ve *gdpp* değişkenleri sağa çarpık bir dağılıma sahipken *life_expec* değişkeni sola çarpık bir dağılıma sahiptir.
+#### Değişkenlerin ortalamaları ve varyanlasları birbirinden oldukça farklı olduğu için  korelasyon matrisi üzerinden PCA yapılmalıdır.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE,fig.height=6,fig.width=8}
+
+pairs(data)
+corr <- cor(data, method = "pearson")
+corrplot.mixed(corr, lower="pie",upper="number")
+```
+
+### Yüksek Korelasyonlu Değişenler
+
+#### *child mort*(5 yaş altı çocukların ölümü) ile *life_expec*(yeni doğan bir çocuğun ortalama yaşam süresi)  değişkenleri arasında (-1'e çok yakın olduğu için -0.89) negatif yönde güçlü doğrusal bir ilişki vardır. Yine *life_expec* ile *total_fer*(bir kadının doğacak çocuk sayısı) arasında (-1'e yakın olduğu için -0.76) ile negatif yönde doğrusal  bir ilişki vardır. *income* ve *gdpp* arasında beklenildiği üzere (1'e çok yakın 0.9) ile pozitif yönde çok güçlü doğrusal bir ilişki varken *total_fer* ve *chil_mort* (0.85) ile *exports* ve *imports* (0.74) pozitif yönde korelasyonu yüksek değişkenlerdir. *export* ve *income* arasında ise orta düzeyde doğrusal bir ilişki vardır.(0.51)
+
+# 3) PCA
+### a) Bileşen Sayısı
+#### Özdeğerler
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data.cor <- cor(data)
+data.eigen <- eigen(data.cor)
+eigenvalues <- data.eigen$value
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+prop.var <- data.eigen$value/sum(data.eigen$values )
+cum.prop.var <- cumsum(prop.var)
+rbind(eigenvalues,prop.var,cum.prop.var)
+```
+
+#### İlk 3 bileşenin değeri 1'in üstünde ve 4.bileşen değeri 1'e çok yakın olduğu için şimdilik 4 bileşen veriyi açıklamaya yetiyor.
+
+
+#### 1.bileşen tek başına verilerin %45'ini açıklarken ikinci bileşenle birlikte verilerin %63'ü açıklanabilirken 3.bileşenle birlikteyse %76'lık bir açıklayıcılağa erişiliyor. 4.bileşeden itibaren ise bileşenlerin özdeğerlerinin 1'in altına düştüğü görülüyor.
+
+### Temel bileşen sayısına karar vermek için bakılan grafikler ve yapılan analizler
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+plot(prop.var , xlab=" Principal Component ", ylab=" Proportion of
+Variance Explained ", ylim=c(0,1) ,type='b')#burada aslında dirsek metoduna göre k=3 seçilebilir
+
+plot(cum.prop.var, xlab=" Principal Component ", ylab ="
+Cumulative Proportion of Variance Explained ", ylim=c(0,1) ,
+     type='b')
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data.pca <- prcomp(data, center = TRUE, scale. = TRUE)
+summary(data.pca)
+plot(data.pca)#3.bileşenden sonra onemli bir degisim olmamıs.
+```
+
+#### Özdeğerlerin karekökleri
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sqrt(data.eigen$values)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(2,2))
+screeplot(data.pca)
+screeplot(data.pca,type="lines")
+fviz_eig(data.pca)
+```
+
+#### PC3 bileşininden sonra sd değerleri 1'in altına düştüğü, scree plot ve plot grafiklerine  bakıldığında (dirsek metodu) 3.bileşenden sonra çok büyük bir değişim olmadığı ve PC3 ile verinin total olarak %76'sı açıklanabildiği için burada 3 bileşen seçilmiştir ve analize 3 bileşen üzerinden devam edilmiştir.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data.pca$x [1:10,1:3]
+```
+
+### b) Temel Bileşenlerin Yorumlanması
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data.pca$rotation #ozvektorler
+```
+
+#### Özvektör değerlerine göre artık verinin boyut indirgenmiş halinde PC1 bileşeni *child_mort*,*life_expec*, *total_fer* ve *income*  değişkenlerini temsil ederken PC2 *imports* ve *exports*, PC3 ise *inflation*  ve *health* değişkenlerini  temsil ediyor. PC1->life_quality, PC2->trade, PC3<-financial_status
+
+
+```{r echo=FALSE, fig.height=11, fig.width=14, message=FALSE, warning=FALSE}
+biplot(data.pca)
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+data.pca$x ["Singapore",1:3]
+
+```
+
+
+#### Yukarıdaki grafikte bileşenler bazında değişkenlerin ve eyaletlerin konumları gösterilmiştir. Singapur'un konumuna bakıldığında PC1 (life_quality) açısından pozitif PC2 (trade) açısından negatif konumda yer almaktadır ve en yüksek temsil edilme oranı 2.bileşen ile olmuştur. Singapur export ve import değişkenleri ile aynı tarafta bulunduğu için ithalat ve ihracat değerlerinin yüksek olduğu söylenebilir. Aynı şekilde life_exp ve income değişkenleri ile de aynı tarafta bulunduğundan oratlama yaşam beklentisi ve gelir açısından yüksek bir şehirken çocuk ölümleri(chil_mort) ve doğacak çocuk sayısı (total_fer) bakımından düşüktür.
+
+```{r echo=FALSE}
+data ["Singapore",]
+summary(data)
+```
+
+#### Özet istatistik değerlerine bakıldığında yine benzer yorumlar yapılabilir. Çocuk ölümleri(child_mort= 2.8<38.27), doğan çocuk sayısı(total_fer=1.15<2.94) ortalamaya kıyasla düşüktür. Income (72100>17145) değişkeni ise ortalamaya kıyasla bir hayli yüksektir.*exports*,*imports*,ve *life_exp*  değişkenleri ise maximum değerler alarak ortalamadan bir hayli yüksektir yani Singapur ihracat, ithalat, gelir ve yaşam süresi bakımından yüksek değerlere sahiptir.
+
+```{r echo=TRUE}
+data["Malta",]
+data["Luxembourg",]
+```
+
+#### Malta ve Luxembourg içinde benzer yorumlar yapılabilir.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+data["Nigeria",]
+data.pca$x["Nigeria",1:3]
+summary(data)
+```
+
+#### Nijeraya'ya bakıldığında ise en yüksek 3. bileşen tarafından temsil edildiği görülüyor.(inflation=104>>5 (max değer)) *total_fer* ve *child_mort* değişkenleri bakımından da ortalamadan yüksektir
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data["Turkey",]
+data.pca$x["Turkey",1:3]
+```
+
+#### Türkiye ise en yüksek PC2 (export,import) bileşini tarafından temsil edilmektedir.Bu değişkenlere kıyasla zıt konumda olduğu için (mean(exports)=41>20) ihracat ve ithalat açısından düşük değerlere sahiptir.Yaşam beklentisi ve çocuk ölümleri bakımından ise medyana yakın bir sonuç çıkmıştır.
+
+#### Yukarıdaki grafiğe bakıldığında Nijerya, Afrika, Haiti gibi sol tarafta kalan ülkeler açısından *doğacak çocuk sayısı* ve *çocuk ölümleri* değişkenlerinin; Norveç, Katar ve İrlanda gibi sağ tarafta konumlanan ülkeler açısından da *yaşam süresi*, *gelir* ve *gysh* değişkenlerinin yüksek değerler aldığı söylenebilir. Benzer olarak; Malta, Lüksemburg ve Singapur gibi ülkelerin *ithalat* ve *ihracat* değişkenlerinin yüksek olduğu söylenebilir.
+
+### Değişkenlerin Her Bileşene Katkısı
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+res.var <- get_pca_var(data.pca)
+res.var$contrib      # Degiskenlerin her bilesene katkisi
+```
+
+#### Dim1 boyutunda child_mort 17.599657 ile , Dim2 boyutunda ise imports 45.13 ile en fazla katkıda bulunan değişkenlerdir.
+
+
+### Değişkenlerin her bir bileşen tarafından açıklanma oranları
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+res.var$cos2  
+```
+
+#### Yalnızca PC1 ile çocuk ölümlerinin %72'si temsil edilirken 3 bileşenle birlikte %80'i temsil edilmektedir.
+
+
+### c) Destekleyici Görseller
+```{r echo=FALSE, fig.height=11, fig.width=14, message=FALSE, warning=FALSE}
+par(mfrow=c(1,2))
+ggbiplot(data.pca,ellipse=TRUE,choices=c(1,3),labels=rownames(data))
+ggbiplot(data.pca,ellipse=TRUE,choices=c(2,3),   labels=rownames(data))
+```
+
+#### İki vektörün birbirine yakın olması birbiriyle  ilişkili olduğunu göstermektedir.*total_fer* ve *child_mort* değişkenleri ile import ve export değişkenleri birbirlerine oldukça yakın oldukları için aradaki ilişki de kuvvetlidir. 
+
+#### PC1-PC3 boyutundaki grafiğe bakıldığında U.S(Amerika), Liberya ve Mikronezya gibi ülkelerin *health(sağlık)* açısından ortalamadan yüksek değerler aldığı görülmüştür.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_pca_var(data.pca, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE )
+```            
+
+#### Öte yandan *imports*  ve *life_expec* değişkenlerinin aralarındakı açı 90 dereceye yakın olduğu için korelasyonlarının çok düşük olduğu söylenebilir.
+#### *life_expec* ve *child_mort* arasında yaklaşık 180 dereceli bir açı olduğu için ters yönde ilişkilidir.
+#### Benzer yorumlar tanımlayıcı istatistik kısmında korelasyon matrisi üzerinden yapılmıştır.
+#### Dim1 boyutunda *child_mort* ve *total_fer* değişkenleri önemliyken Dim2 boyutunda *import* ve *export* değişkenleri önemlidir.
+
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_pca_biplot(data.pca, repel = TRUE,
+                col.var = "#2E9FDF", # Variables color
+                col.ind = "#696969"  # Individuals color
+)
+
+```
+
+### Tüm Olası Modeller
+####PC1-PC2
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(2,2))
+fviz_pca_var(data.pca, axes = c(1, 2), col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE # Avoid text overlapping
+)
+
+```
+
+
+#### PC1-PC3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_pca_var(data.pca, axes = c(1, 3), col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE # Avoid text overlapping
+)
+```
+
+###3 PC2-PC3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_pca_var(data.pca, axes = c(2, 3), col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+             repel = TRUE # Avoid text overlapping
+)
+```
+
+# 4) Uzaklık-Benzerlik Matrisleri
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+data_scale=scale(data)
+summary(data_scale) 
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(1,2))
+boxplot(data,main="Orginal Data")
+boxplot(data_scale,main="Standart Data")
+```
+
+#### Verilerin standartlaştırıldıktan sonraki kutu grafiklerine bakıldığında uç ve aykırı değerlere sahip olduğu görülmektedir.
+
+
+```{r echo=TRUE, fig.height=13, fig.width=12, message=FALSE, warning=FALSE}
+dist_eucl=dist(data_scale, method="euclidean")
+View(round(as.matrix(dist_eucl)))
+fviz_dist(dist_eucl)
+```
+
+
+```{r echo=TRUE, fig.height=13, fig.width=12, message=FALSE, warning=FALSE}
+dist_man=dist(data_scale, method="manhattan") 
+View(round(as.matrix(dist_man)))
+fviz_dist(dist_man)
+```
+
+
+```{r echo=TRUE, fig.height=13, fig.width=12, message=FALSE, warning=FALSE}
+dist.cor=get_dist(data_scale, method="pearson")
+round(as.matrix(dist.cor)[1:5, 1:5], 1)
+fviz_dist(dist.cor)
+```
+
+```{r echo=TRUE}
+round(as.matrix(dist_eucl)[1:10, 1:10], 2)
+round(as.matrix(dist_man)[1:10, 1:10], 2)
+round(as.matrix(dist.cor)[1:10, 1:10], 1)
+```
+
+
+#### Veriler arasındaki uzaklıkları ölçmek için üç farklı yöntem de denenmiştir.Üç yöntemde birbirine paralel sonuçlar vermiştir. Manhattan uzaklık ölçüsü Öklide göre 3 kat daha vurguludur. Pearson ise bu iki uzaklık ölçüsünden daha farklı bir konumdadır. Değişkenler arasındaki benzerlik bakımından sonuçları gösterir.
+
+```{r warning=FALSE, include=FALSE}
+round(as.matrix(dist_man)[45:60,45:60], 2)# verinin içinden 15 satir ve sutuna bakilmistir. 
+```
+
+
+#### Uzaklık matrisine göre birbirine en yakın ve uzak ülkeler:
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+round(as.matrix(dist_man)[45:46,46:47], 2) 
+round(as.matrix(dist_man)[58:59, 54:55], 2)
+```
+
+#### Dominican-Ecuador->>1.73
+#### Germany-Finland->>1.78
+#### Germany-France->>1.89
+#### Yukarıdaki grafiklerde de görüldüğü üzere Almanya ve Fransa değişkenlerin aldığı değerler açısından benzerdir.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+round(as.matrix(dist_man)[60:75,60:75], 2)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+round(as.matrix(dist_man)[63:64,73:74], 2)
+round(as.matrix(dist_man)[67:68, 74:75], 2)
+round(as.matrix(dist_man)[67:68, 69:70], 2)
+```
+
+#### Haiti-Ireland->>21.99
+#### Guinea-Ireland->>20.04
+#### Haiti-Iceland->>18.82
+#### Haiti ve İrlanda ise birbirlerinden oldukça farklı değişken değerleri almıştır. 
+
+
+# 5) Kümeleme Analizleri
+### K Means 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(123)
+fviz_nbclust(data_scale,kmeans,method = "wss") 
+```
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(123)
+fviz_nbclust(data_scale,kmeans,method = "silhouette") 
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+set.seed(123)
+fviz_nbclust(data,kmeans,method = "gap_stat") 
+```
+
+### k=3
+```{r include=FALSE}
+set.seed(123)
+km_res_3 <- kmeans(data_scale, 3, nstart=50) 
+print(km_res_3)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(ggthemes)
+fviz_cluster(km_res_3, data = data_scale,
+             ellipse.type = "convex", # Concentration ellipse
+             star.plot = TRUE, # Add segments from centroids to items
+             repel = TRUE, # Avoid label overplotting (slow)
+            )
+```
+
+
+### k=4
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(123)
+km_res_4 <- kmeans(data_scale, 4, nstart=50) 
+print(km_res_4)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(ggthemes)
+fviz_cluster(km_res_4, data = data_scale,
+             ellipse.type = "euclid",
+             star.plot = TRUE, 
+             repel = TRUE, 
+            )
+```
+
+### kmeans=4
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+aggregate(data_scale, by=list(km_res_4$cluster), mean) #orjinal veri kullanılarak kümelere göre her değişken için ortalaması
+aggregate(data_scale, by=list(km_res_4$cluster), sd)
+```
+
+### k=5
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(123)
+km_res_5 <- kmeans(data_scale, 5, nstart=50) 
+print(km_res_5)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(km_res_5, data = data_scale,
+             ellipse.type = "convex",
+             star.plot = TRUE, 
+             repel = TRUE, 
+            )
+```
+
+#### Model;                 Kümelerin sahip olduğu eleman sayıları;
+#### k=3 için %44.7         36,84,47            
+#### k=4 için %53.4         30,87,47,3
+#### k=5 için %58.8         230,87,47,3,1
+#### açıklayıcılığa sahiptir.
+
+
+### PCA + K Means
+
+```{r}
+summary(data.pca)
+data_pca <- predict(data.pca)[,1:3]
+par(mfrow=c(2,2))
+fviz_nbclust(data_pca,kmeans,method = "wss") 
+fviz_nbclust(data_pca,kmeans,method = "silhouette") 
+fviz_nbclust(data_pca,kmeans,method = "gap_stat") 
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(123)
+km_res_p1 <- kmeans(data_pca, 3, nstart=50) 
+print(km_res_p1)
+```
+
+### k=3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(km_res_p1, data = data_pca,
+             ellipse.type = "convex", # Concentration ellipse
+             star.plot = TRUE, # Add segments from centroids to items
+             repel = TRUE, # Avoid label overplotting (slow)
+             ggtheme = theme_minimal()
+)
+```
+
+
+### pca kmeans=3
+```{r echo=FALSE}
+aggregate(data_pca, by=list(km_res_p1$cluster), mean) #orjinal veri kullanılarak kümelere göre her değişken için ortalaması
+aggregate(data_pca, by=list(km_res_p1$cluster), sd)
+
+```
+
+
+
+### k=4
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(123)
+km_res_p2 <- kmeans(data_pca, 4, nstart=50) 
+print(km_res_p2)
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(km_res_p2, data = data_pca,
+             ellipse.type = "convex", 
+             star.plot = TRUE, 
+             repel = TRUE, 
+             ggtheme = theme_minimal()
+)
+```
+### pca kmeans=4
+```{r echo=FALSE}
+aggregate(data_pca, by=list(km_res_p2$cluster), mean) #orjinal veri kullanılarak kümelere göre her değişken için ortalaması
+aggregate(data_pca, by=list(km_res_p2$cluster), sd)
+
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+set.seed(123)
+km_res_p3 <- kmeans(data_pca, 5, nstart=50) 
+print(km_res_p3)
+```
+
+
+### k=5 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(km_res_p3, data = data_pca,
+             ellipse.type = "convex", 
+             star.plot = TRUE, 
+             repel = TRUE, 
+             ggtheme = theme_minimal()
+)
+```
+
+### pca kmeans=5
+```{r echo=FALSE}
+aggregate(data_pca, by=list(km_res_p3$cluster), mean) #orjinal veri kullanılarak kümelere göre her değişken için ortalaması
+aggregate(data_pca, by=list(km_res_p3$cluster), sd)
+
+```
+
+#### Model; ***********************       Kümelerin sahip olduğu eleman sayıları;
+#### k=3 için %52 ****************           93,71,3            
+#### k=4 için % 61.4 ****************       73,44,3,47     
+#### k=5 için %67    ****************       49,41,37,3,37
+#### açıklayıcılığa sahiptir.
+
+### K medoids
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+fviz_nbclust(data_scale, pam, method= "silhouette") #max. oldugu nokta dikkate alindigindan k degeri 2 olarak secilir.
+
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_nbclust(data_scale, pam, method= "wss")#3 ya 4 olabilir
+
+```
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_nbclust(data_scale, pam, method= "gap")
+```
+
+### k=3
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pam_data_3 <- pam(data_scale,3)
+print(pam_data_3)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(pam_data_3,
+             ellipse.type = "convex",
+             repel = TRUE, 
+             ggtheme = theme_classic()
+)
+```
+### kmedoids k=3
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+aggregate(data_scale, by=list(pam_data_3$cluster), mean) 
+aggregate(data_scale, by=list(pam_data_3$cluster), sd)
+
+```
+
+
+### k=4
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pam_data_4 <- pam(data_scale,4)
+print(pam_data_4)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(pam_data_4,
+             ellipse.type = "convex",
+             repel = TRUE, 
+             ggtheme = theme_classic()
+)
+```
+
+
+### k=5
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pam_data_5 <- pam(data_scale,5)
+print(pam_data_5)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(pam_data_5,
+             ellipse.type = "t",
+             repel = TRUE, 
+             ggtheme = theme_classic()
+)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+par(mfrow=c(2,2))
+fviz_nbclust(data_pca, pam, method= "silhouette")
+fviz_nbclust(data_pca, pam, method= "gap")
+fviz_nbclust(data_pca, pam, method= "wss") 
+```
+
+
+### k=3
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pam_data_pca3 <- pam(data_pca,3)
+print(pam_data_pca3)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(pam_data_pca3,
+             ellipse.type = "convex",
+             repel = TRUE, 
+             ggtheme = theme_classic()
+)
+```
+
+### kmedoids pca k=3
+```{r}
+aggregate(data_pca, by=list(pam_data_pca3$cluster), mean) 
+aggregate(data_pca, by=list(pam_data_pca3$cluster), sd)
+
+```
+
+### k=4
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pam_data_pca4 <- pam(data_pca,4)
+print(pam_data_pca4)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(pam_data_pca4,
+             ellipse.type = "convex",
+             repel = TRUE, 
+             ggtheme = theme_classic()
+)
+```
+
+
+### k=5
+```{r message=FALSE, warning=FALSE, include=FALSE}
+pam_data_pca5 <- pam(data_pca,5)
+print(pam_data_pca5)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(pam_data_pca5,
+             ellipse.type = "convex",
+             repel = TRUE, 
+             ggtheme = theme_classic()
+)
+```
+
+
+#### Yapılan analizler ve elde edilen görseller sonucunda küme içi değişim ve homojen dağılımları da dikkate alınarak  %67 açıklanabilirlik seviyesiyle PCA ile boyut küçültülmüş 5 kümeli k_means algoritması seçilmiştir.
+#### Veri ve çalışmanın amacı doğrultusunda PCA ile boyut küçültülmüş 4 kümeli k_means veya 3 kümeli  k_medoids algoritmaları da ikinci ve üçüncü seçenek olarak değerlendirilebilir.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+fviz_cluster(km_res_p3, data = data_pca,
+             ellipse.type = "convex", 
+             star.plot = TRUE, 
+             repel = TRUE, 
+             ggtheme = theme_minimal()
+)
+```
+
+#### Grafiğe göre Lüksemburg, İrlanda,Belçika  gibi sağ tarafta konumlanan ülkeler Dim1 ve Dim2 boyutunda yüksek değerler almıştır. Haiti ve Nijerya gibi grafiğin sol tarafında kalan ülkeler ise    daha düşük değerler almıştır. Yani bu ülkeler yaşam kalitesi ve ticaret anlamında zayıf ülkelerdir. Bu anlamda öncelikli yardımın bu kümedeki ülkelere yapılması gerekmektedir. Türkiye ise konumu itibariyle ortadaki kümede yer almaktadır. Dim2 (ticaret) boyutu bakımından düşükken Dim1 (hayat kalitesi) boyutu bakımından ortalamaya yakındır .
